@@ -82,7 +82,7 @@ bool setup_wifi(void){
   // Wait while wifi is not connected or delay is exceeded (1 min)  
   while (WiFi.status() != WL_CONNECTED && !delayExceeded) {
     delay(100);
-    Serial.printf("\r  Waiting : %f sec", (millis() - t) / 1000.0);
+    Serial.printf("\r=> Waiting : %f sec", (millis() - t) / 1000.0);
     if (millis() - t > 1 * 60 * 1000) delayExceeded = true;
   }
 
@@ -109,10 +109,9 @@ bool connect_to_mqtt_server() {
     bool delayExceeded = false;
     while (!client.connected() && !delayExceeded) {
       delay(100);
-      Serial.printf("\r  Waiting : %f sec", (millis() - t) / 1000.0);
+      Serial.printf("\r=> Waiting : %f sec", (millis() - t) / 1000.0);
       if (client.connect("WeatherStationFrancis"))
       {
-        Serial.println("OK");
         client.subscribe(RESPONSE "/#");
       }      
       if (millis() - t > 1 * 60 * 1000) delayExceeded = true;
@@ -188,7 +187,7 @@ void loop() {
       while (millis() - t <= 5 * 1000){
           delay(100); 
           client.loop();
-          Serial.printf("\rWaiting : %f sec", (millis() -t) / 1000.0);
+          Serial.printf("\r=> Waiting : %f sec", (millis() -t) / 1000.0);
       }
       Serial.println("\nDisconnecting mosquitto client ...");
       client.disconnect();
@@ -198,16 +197,16 @@ void loop() {
 
 // Déclenche les actions à la réception d'un message
 void callback(char* topic, byte* payload, unsigned int length) {
-    char fw_name[256];
+    char fw_name[512] = {0};
     strncpy(fw_name, (char*)payload, length); 
-    Serial.println("Message recu =>  ");
+    Serial.println("\nMessage recu =>  ");
     Serial.printf("  - topic: %s\n", topic);  
-    Serial.printf("  - Payload: %s\n", (char*)fw_name);
-    Serial.printf("Length = %d \n", length);
+    Serial.printf("  - Payload: %s\n", fw_name);
+    Serial.printf("  - Length = %d\n", length);
     
     if (strcmp(topic, MQTT_TOPIC_FOTA_RESPONSE) == 0)
     {
-        start_fota((char*)payload);
+        start_fota((char*)fw_name);
     }
 }
 
@@ -230,8 +229,7 @@ void start_fota(char* fwName){
     }
 }
 
-void disable_wifi(void)
-{
+void disable_wifi(void){
   // todo : Comment two below lines (to lower the power during LIGHT_SLEEP_T delay)
   WiFi.disconnect();
   WiFi.mode(WIFI_OFF);
@@ -247,14 +245,12 @@ void enter_in_sleep_mode(void){
     unsigned long t = millis();
     while (millis() - t <= 15 * 60 * 1000){
         delay(100); 
-        Serial.printf("\rWaiting : %f", (millis() -t) / 1000.0);
+        Serial.printf("\r=> Waiting : %f", (millis() -t) / 1000.0);
     }
     Serial.println("");
 }
 
-
-int push_data(const char* topic, const char* data)
-{
+int push_data(const char* topic, const char* data){
   Serial.println("Try to publish :");
   Serial.printf("   -- Topic : %s \n", topic);
   Serial.printf("   -- Data  : %s \n", data);

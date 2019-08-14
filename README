@@ -1,0 +1,1 @@
+Change MQTT_MAX_PACKET_SIZE in PubSubClient.h to send all sensor data

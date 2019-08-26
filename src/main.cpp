@@ -11,10 +11,10 @@ extern "C" {
 #include <Adafruit_Sensor.h>
 #include "DHT.h"
 
-#define SSID "XXXXXXXXXXX"
-#define PASSWD "XXXXX"
+#define SSID ""
+#define PASSWD ""
 
-#define MQTT_SERVER "XX.XX.XX.XX"
+#define MQTT_SERVER ""
 
 #define REQUEST "request"
 #define RESPONSE "response"
@@ -28,6 +28,7 @@ extern "C" {
 
 const char version_s[11] = "1.0.0";
 char buffer_c[100];
+bool bmp180_failed = false;
 
 // DHT22
 DHT dht(DHTPIN, DHTTYPE);
@@ -50,24 +51,36 @@ int push_data(const char* topic, const char* data);
 void setup() {
   // put your setup code here, to run once:
     Serial.begin(9600);     //Facultatif pour le debug
-    
+    struct rst_info* rtc_info = system_get_rst_info();
+    Serial.print("\nReset cause => ");
+    if (rtc_info->reason  == REASON_DEFAULT_RST) Serial.println("Normal Startup");    
+    else if (rtc_info->reason  == REASON_WDT_RST) Serial.println("Hardware watchdog reset");
+    else if (rtc_info->reason  == REASON_EXCEPTION_RST) Serial.println("Fatal exception");    
+    else if (rtc_info->reason  == REASON_SOFT_WDT_RST) Serial.println("Software watchdog reset");
+    else if (rtc_info->reason  == REASON_SOFT_RESTART) Serial.println("Software reset");
+    else if (rtc_info->reason  == REASON_DEEP_SLEEP_AWAKE) Serial.println("Deep sleep");
+    else if (rtc_info->reason  == REASON_EXT_SYS_RST) Serial.println("External reset");    
+    else Serial.println(rtc_info->reason);
     delay(100);
     
     char macAddress[17];
     strcpy(macAddress, WiFi.macAddress().c_str());
 
-    Serial.println("");
-    Serial.println("+-----------------------------------------");
+    Serial.println("\n+-----------------------------------------");
     Serial.printf( "| App version : %25s |\n", version_s);
     Serial.printf( "| DeviceId    : %25s |\n", WiFi.macAddress().c_str());
     Serial.printf( "| SSID        : %25s | \n", SSID);
-    Serial.println("+-----------------------------------------");
+    Serial.println("+-----------------------------------------\n");
         
     client.setServer(MQTT_SERVER, 1883);    //Configuration de la connexion au serveur MQTT
     client.setCallback(callback);  //La fonction de callback qui est executée à chaque réception de message     
 
     dht.begin();
-    bmp.begin();
+    if (!bmp.begin())
+    {
+    bmp180_failed = true;
+    Serial.println("=================> Failed to initialise BMP sensor <=================");
+    }
 }
 
 bool setup_wifi(void){
@@ -88,7 +101,7 @@ bool setup_wifi(void){
 
   if (delayExceeded)
   {
-    Serial.printf("\nFailed to connect to ssid %s \n", SSID);
+    Serial.printf("=================> Failed to connect to ssid %s <=================\n", SSID);
     return false;
   }
   else
@@ -118,7 +131,7 @@ bool connect_to_mqtt_server() {
     }
     if (delayExceeded)
     {
-      Serial.println("\nFailed to connect broker");
+      Serial.println("=================> Failed to connect broker <=================");
       return false;      
     }
     else
@@ -137,38 +150,45 @@ bool connect_to_mqtt_server() {
 
 void loop() {
     // put your main code here, to run repeatedly:
-    float dht_temp = dht.readTemperature();
+  float dht_temp, dht_hum, bmp_temp = 0.0;
+  uint32_t bmp_pressure, bmp_alt = 0;
+  if (!bmp180_failed){
+    dht_temp = dht.readTemperature();
 
     Serial.print("Temperature : ");
     Serial.println(dht_temp);
 
+    dht_hum = dht.readHumidity();
+    Serial.print("Humidity : ");
+    Serial.println(dht_hum);
+
+    
     float bmp_temp = bmp.readTemperature();
 
     Serial.print("Temperature: ");
     Serial.println(bmp_temp);
 
-    uint32_t bmp_pressure = bmp.readPressure() / 100;
+    bmp_pressure = bmp.readPressure() / 100;
     
     Serial.print("Pression: ");
     Serial.println(bmp_pressure);
 
-    float dht_hum = dht.readHumidity();
-    Serial.print("Humidity : ");
-    Serial.println(dht_hum);
-
-    float bmp_alt = bmp.readAltitude() * (-1);
+    bmp_alt = bmp.readAltitude() * (-1);
     Serial.print("Altitude : ");
     Serial.println(bmp_alt);
     Serial.println();
+  }
+
+    delay(600);
     
     const int capacity = JSON_OBJECT_SIZE(5);
     StaticJsonDocument<capacity> doc;   
 
-    doc["Temp_DHT11"] = dht_temp;
-    doc["Humid_DHT"] = dht_hum;
-    doc["Temp_BMP180"] = bmp_temp;
+    doc["Temperature_DHT11"] = dht_temp;
+    doc["Humidity_DHT11"] = dht_hum;
+    doc["Temperature_BMP180"] = bmp_temp;
     doc["Pressure_BMP180"] = bmp_pressure;
-    doc["Altitud_BMP"] = bmp_alt;
+    doc["Altitude_BMP"] = bmp_alt;
     
     if (connect_to_mqtt_server())
     {
@@ -239,7 +259,7 @@ void disable_wifi(void){
 }
 
 void enter_in_sleep_mode(void){
-    Serial.println("Switch off WIFI");
+    /*Serial.println("Switch off WIFI");
     disable_wifi();
     Serial.println("Wait 15 min");
     unsigned long t = millis();
@@ -247,7 +267,12 @@ void enter_in_sleep_mode(void){
         delay(100); 
         Serial.printf("\r=> Waiting : %f", (millis() -t) / 1000.0);
     }
-    Serial.println("");
+    Serial.println("");*/
+    // Deep sleep mode for 30 seconds, the ESP8266 wakes up by itself when GPIO 16 (D0 in NodeMCU board) is connected to the RESET pin
+  Serial.println("Deep sleep mode enabled");
+  // Deep sleep mode during 15min
+  ESP.deepSleep(15 * 60 * 1000000); 
+  Serial.println("End of deep sleep");
 }
 
 int push_data(const char* topic, const char* data){
@@ -261,10 +286,10 @@ int push_data(const char* topic, const char* data){
         res = client.publish(topic, data);
         if (!res)
         {
-        Serial.print("Failed to send Mqtt Data => Topic : ");
+        Serial.print("=================> Failed to send Mqtt Data => Topic : ");
         Serial.print(topic);
         Serial.print(" , Data : ");
-        Serial.println(data);
+        Serial.printf("%s <=================>\n", data);
         
         // Wait 1 sec before to retry
         delay(1000);
